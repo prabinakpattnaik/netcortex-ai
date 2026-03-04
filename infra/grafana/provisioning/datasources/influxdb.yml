@@ -1,0 +1,16 @@
+apiVersion: 1
+
+datasources:
+  - name: InfluxDB
+    type: influxdb
+    access: proxy
+    url: http://influxdb:8086
+    isDefault: true
+    jsonData:
+      version: Flux
+      organization: datacenter
+      defaultBucket: telemetry
+      tlsSkipVerify: true
+    secureJsonData:
+      token: dc-monitor-super-secret-token-2024
+    editable: true

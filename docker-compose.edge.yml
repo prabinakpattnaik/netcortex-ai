@@ -1,0 +1,35 @@
+# ═══════════════════════════════════════════════════════════════════════
+#  AI Datacenter Monitoring — Edge VM Deployment
+#  Deploy on VM1-VM3 with: make edge-up
+#
+#  Runs InsightAgent with real system metrics (SIMULATE=false)
+#  and FRR platform support for BGP/OSPF data collection.
+#
+#  Prerequisites:
+#    - FRR installed and configured on the host
+#    - .env.edge configured with correct NODE_ID, NODE_IP, KAFKA_BROKER
+# ═══════════════════════════════════════════════════════════════════════
+
+services:
+  insight-agent:
+    build:
+      context: ./services/insight-agent
+    container_name: dc-insight-agent
+    network_mode: host           # real host metrics + FRR vtysh access
+    privileged: true             # needed for gopsutil + sysfs thermal
+    environment:
+      NODE_ID: ${NODE_ID}
+      NODE_IP: ${NODE_IP}
+      NODE_ROLE: ${NODE_ROLE:-leaf}
+      PLATFORM: ${PLATFORM:-frr}
+      KAFKA_BROKER: ${KAFKA_BROKER}
+      KAFKA_TOPIC_METRICS: ${KAFKA_TOPIC_METRICS:-datacenter.metrics}
+      KAFKA_TOPIC_FLOWS: ${KAFKA_TOPIC_FLOWS:-datacenter.flows}
+      SIMULATE: "false"
+      COLLECT_INTERVAL: ${COLLECT_INTERVAL:-5s}
+    volumes:
+      # FRR vtysh socket — required for BGP neighbor collection
+      - /var/run/frr:/var/run/frr:ro
+      # Linux thermal zones — sysfs access for hardware temperatures
+      - /sys:/sys:ro
+    restart: unless-stopped

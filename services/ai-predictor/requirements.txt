@@ -1,0 +1,7 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+aiokafka==0.12.0
+scikit-learn==1.6.1
+numpy==2.2.2
+pydantic-settings==2.7.1
+influxdb-client[async]==1.46.0

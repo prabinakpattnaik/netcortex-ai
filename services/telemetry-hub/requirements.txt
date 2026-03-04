@@ -1,0 +1,6 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+aiokafka==0.12.0
+influxdb-client[async]==1.46.0
+pydantic-settings==2.7.1
+orjson==3.10.13

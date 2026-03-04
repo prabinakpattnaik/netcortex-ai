@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SONiC Datacenter NOC</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0a0e14; color: #c8d0d8; }
+
+        /* ── Header ─────────────────────────────────── */
+        .header {
+            background: linear-gradient(135deg, #111820 0%, #0a0e14 100%);
+            padding: 12px 28px; display: flex; align-items: center; justify-content: space-between;
+            border-bottom: 2px solid #00b8d4;
+        }
+        .header h1 { font-size: 18px; font-weight: 600; color: #00b8d4; display: flex; align-items: center; gap: 10px; }
+        .header h1 .sonic-badge { background: #00b8d4; color: #0a0e14; font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 3px; letter-spacing: 1px; }
+        .header .status { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+        .status-dot { width: 9px; height: 9px; border-radius: 50%; }
+        .status-dot.connected { background: #00e676; box-shadow: 0 0 6px #00e676; }
+        .status-dot.disconnected { background: #ff5252; box-shadow: 0 0 6px #ff5252; }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .live-badge { animation: pulse 2s infinite; color: #00e676; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
+
+        /* ── Stats bar ──────────────────────────────── */
+        .stats-bar { display: flex; gap: 0; border-bottom: 1px solid #1a2030; background: #0d1219; }
+        .stat-cell { flex: 1; text-align: center; padding: 12px 8px; border-right: 1px solid #1a2030; }
+        .stat-cell:last-child { border-right: none; }
+        .stat-val { font-size: 22px; font-weight: 700; color: #00b8d4; font-family: 'Consolas', monospace; }
+        .stat-label { font-size: 10px; color: #506070; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+        /* ── Topology ───────────────────────────────── */
+        .topology-section { padding: 16px 28px; }
+        .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: 1.5px; color: #506070; margin-bottom: 12px; font-weight: 600; }
+        .topology-svg { width: 100%; max-width: 900px; margin: 0 auto; display: block; }
+        .topo-node { cursor: pointer; }
+        .topo-node rect { transition: stroke 0.3s, fill 0.3s; }
+        .topo-node:hover rect { stroke: #00e676; }
+        .topo-label { font-family: 'Consolas', monospace; font-size: 11px; fill: #c8d0d8; text-anchor: middle; }
+        .topo-role { font-size: 9px; fill: #506070; text-anchor: middle; text-transform: uppercase; letter-spacing: 1px; }
+        .topo-link { stroke: #1e2a38; stroke-width: 2; }
+        .topo-link.active { stroke: #00b8d455; stroke-width: 2; }
+
+        /* ── Grid layout ────────────────────────────── */
+        .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding: 0 28px 16px; }
+        .grid-full { grid-column: 1 / -1; }
+        .grid-half { grid-column: span 2; }
+
+        .card {
+            background: #111820; border-radius: 8px; padding: 16px;
+            border: 1px solid #1a2535; transition: border-color 0.3s;
+        }
+        .card:hover { border-color: #00b8d444; }
+        .card h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; color: #506070; margin-bottom: 12px; font-weight: 600; }
+
+        /* ── Device cards ───────────────────────────── */
+        .device-card { background: #0d1219; border-radius: 6px; padding: 12px; border: 1px solid #1a2030; }
+        .device-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+        .device-name { font-size: 13px; font-weight: 600; color: #00b8d4; font-family: 'Consolas', monospace; }
+        .device-role { font-size: 9px; padding: 2px 6px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; }
+        .role-spine { background: #7c4dff22; color: #b388ff; border: 1px solid #7c4dff44; }
+        .role-leaf { background: #00b8d422; color: #00e5ff; border: 1px solid #00b8d444; }
+        .role-border { background: #ff6d0022; color: #ff9e40; border: 1px solid #ff6d0044; }
+
+        .metric-row { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; }
+        .metric-label { font-size: 11px; color: #506070; }
+        .metric-value { font-size: 14px; font-weight: 700; font-family: 'Consolas', monospace; }
+        .gauge-bar { width: 100%; height: 6px; background: #0a0e14; border-radius: 3px; overflow: hidden; margin-top: 3px; }
+        .gauge-fill { height: 100%; border-radius: 3px; transition: width 0.6s ease; }
+        .g-green { background: linear-gradient(90deg, #00c853, #69f0ae); }
+        .g-yellow { background: linear-gradient(90deg, #ffd600, #ffab00); }
+        .g-red { background: linear-gradient(90deg, #ff5252, #ff1744); }
+
+        /* ── BGP table ──────────────────────────────── */
+        .bgp-table { width: 100%; font-size: 11px; border-collapse: collapse; }
+        .bgp-table th { text-align: left; color: #506070; font-weight: 500; padding: 5px 8px; border-bottom: 1px solid #1a2030; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .bgp-table td { padding: 5px 8px; border-bottom: 1px solid #111820; font-family: 'Consolas', monospace; }
+        .bgp-state { padding: 2px 6px; border-radius: 3px; font-size: 9px; font-weight: 700; }
+        .bgp-established { background: #00e67622; color: #69f0ae; }
+        .bgp-down { background: #ff525222; color: #ff5252; }
+
+        /* ── Hardware ───────────────────────────────── */
+        .hw-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+        .hw-item { background: #0a0e14; border-radius: 4px; padding: 8px; text-align: center; border: 1px solid #1a2030; }
+        .hw-item .hw-name { font-size: 9px; color: #506070; text-transform: uppercase; margin-bottom: 4px; }
+        .hw-item .hw-val { font-size: 16px; font-weight: 700; font-family: 'Consolas', monospace; }
+        .hw-item .hw-unit { font-size: 10px; color: #506070; }
+
+        /* ── Alerts & predictions ───────────────────── */
+        .alert-item {
+            display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+            border-radius: 4px; margin-bottom: 6px; font-size: 12px;
+        }
+        .alert-item.critical { background: rgba(255, 23, 68, 0.1); border-left: 3px solid #ff1744; }
+        .alert-item.warning { background: rgba(255, 171, 0, 0.1); border-left: 3px solid #ffab00; }
+        .alert-time { color: #404a54; font-size: 10px; min-width: 65px; font-family: 'Consolas', monospace; }
+        .alert-badge { font-size: 9px; font-weight: 700; text-transform: uppercase; padding: 2px 6px; border-radius: 3px; }
+        .alert-badge.critical { background: #ff1744; color: white; }
+        .alert-badge.warning { background: #ffab00; color: #0a0e14; }
+
+        .prediction-item {
+            background: #0d1219; border-radius: 4px; padding: 10px 12px; margin-bottom: 6px;
+            border-left: 3px solid #7c4dff; font-size: 12px;
+        }
+        .prediction-model { font-size: 9px; text-transform: uppercase; color: #b388ff; font-weight: 700; letter-spacing: 0.5px; }
+        .prediction-detail { color: #8090a0; margin-top: 3px; }
+
+        .flow-table { width: 100%; font-size: 11px; border-collapse: collapse; }
+        .flow-table th { text-align: left; color: #506070; font-weight: 500; padding: 5px 8px; border-bottom: 1px solid #1a2030; font-size: 10px; }
+        .flow-table td { padding: 5px 8px; border-bottom: 1px solid #111820; font-family: 'Consolas', monospace; }
+        .proto-badge { padding: 1px 5px; border-radius: 3px; font-size: 9px; font-weight: 700; }
+        .proto-badge.tcp { background: #00b8d422; color: #00e5ff; }
+        .proto-badge.udp { background: #7c4dff22; color: #b388ff; }
+
+        .footer { text-align: center; padding: 14px; color: #2a3440; font-size: 11px; }
+        .empty-msg { color: #2a3440; padding: 16px; text-align: center; font-size: 12px; }
+
+        /* ── AI Insights panel ─────────────────────── */
+        .ai-panel { background: linear-gradient(135deg, #111820, #0d1219); border: 1px solid #7c4dff33; border-radius: 8px; padding: 16px; margin: 0 28px 12px; }
+        .ai-panel h2 { font-size: 13px; color: #b388ff; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+        .ai-pipeline { display: flex; align-items: center; gap: 0; margin-bottom: 14px; }
+        .ai-stage { flex: 1; text-align: center; padding: 10px 6px; background: #0a0e14; border: 1px solid #1a2535; position: relative; }
+        .ai-stage:first-child { border-radius: 6px 0 0 6px; }
+        .ai-stage:last-child { border-radius: 0 6px 6px 0; }
+        .ai-stage .stage-name { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #506070; }
+        .ai-stage .stage-val { font-size: 18px; font-weight: 700; font-family: 'Consolas', monospace; margin-top: 2px; }
+        .ai-stage .stage-desc { font-size: 9px; color: #3a4a5a; margin-top: 2px; }
+        .ai-arrow { color: #7c4dff55; font-size: 18px; padding: 0 2px; }
+        .demo-controls { display: flex; gap: 8px; flex-wrap: wrap; }
+        .demo-btn {
+            padding: 8px 16px; border: 1px solid #7c4dff55; border-radius: 4px; background: #7c4dff11;
+            color: #b388ff; font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.2s;
+            font-family: 'Consolas', monospace; text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .demo-btn:hover { background: #7c4dff33; border-color: #7c4dff; }
+        .demo-btn:active { transform: scale(0.97); }
+        .demo-btn.firing { background: #ff174433; border-color: #ff1744; color: #ff5252; animation: pulse 0.5s 3; }
+        .demo-status { font-size: 11px; color: #506070; margin-left: auto; display: flex; align-items: center; gap: 6px; }
+
+        /* ── Scrollable panels ──────────────────────── */
+        .scroll-panel { max-height: 300px; overflow-y: auto; }
+        .scroll-panel::-webkit-scrollbar { width: 4px; }
+        .scroll-panel::-webkit-scrollbar-track { background: transparent; }
+        .scroll-panel::-webkit-scrollbar-thumb { background: #1a2535; border-radius: 2px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>
+            <span class="sonic-badge">SONiC</span>
+            AI Datacenter NOC — Network Operations Center
+        </h1>
+        <div class="status">
+            <span class="live-badge">LIVE</span>
+            <div class="status-dot" id="ws-status"></div>
+            <span id="ws-label">Connecting...</span>
+            <span style="color:#2a3440; margin-left:12px;" id="msg-count">0 msgs</span>
+        </div>
+    </div>
+
+    <!-- Stats bar -->
+    <div class="stats-bar">
+        <div class="stat-cell"><div class="stat-val" id="active-devices">0</div><div class="stat-label">SONiC Devices</div></div>
+        <div class="stat-cell"><div class="stat-val" id="bgp-sessions">0/0</div><div class="stat-label">BGP Up / Total</div></div>
+        <div class="stat-cell"><div class="stat-val" id="total-metrics">0</div><div class="stat-label">Metrics Ingested</div></div>
+        <div class="stat-cell"><div class="stat-val" id="total-alerts">0</div><div class="stat-label">Alerts</div></div>
+        <div class="stat-cell"><div class="stat-val" id="total-predictions">0</div><div class="stat-label">AI Predictions</div></div>
+        <div class="stat-cell"><div class="stat-val" id="anomaly-rate">0%</div><div class="stat-label">Anomaly Rate</div></div>
+    </div>
+
+    <!-- Topology Diagram (SVG) -->
+    <div class="topology-section">
+        <div class="section-title">Leaf-Spine Fabric Topology</div>
+        <svg class="topology-svg" viewBox="0 0 900 260" xmlns="http://www.w3.org/2000/svg">
+            <!-- Links: border → spine -->
+            <line class="topo-link active" id="link-b1-s1" x1="450" y1="55" x2="450" y2="105"/>
+            <!-- Links: spine → leafs -->
+            <line class="topo-link active" id="link-s1-l1" x1="380" y1="145" x2="300" y2="195"/>
+            <line class="topo-link active" id="link-s1-l2" x1="520" y1="145" x2="600" y2="195"/>
+            <!-- Links: border → spine dashed -->
+            <line class="topo-link" x1="450" y1="30" x2="450" y2="15" stroke-dasharray="5,5"/>
+            <text x="450" y="10" text-anchor="middle" font-size="9" fill="#506070" font-family="Consolas">ISP / WAN</text>
+
+            <!-- Border node -->
+            <g class="topo-node" id="topo-sonic-border-01">
+                <rect x="375" y="25" width="150" height="35" rx="4" fill="#111820" stroke="#ff6d00" stroke-width="1.5"/>
+                <text class="topo-label" x="450" y="45">sonic-border-01</text>
+                <text class="topo-role" x="450" y="22" fill="#ff9e40">BORDER</text>
+            </g>
+
+            <!-- Spine node -->
+            <g class="topo-node" id="topo-sonic-spine-01">
+                <rect x="375" y="100" width="150" height="35" rx="4" fill="#111820" stroke="#7c4dff" stroke-width="1.5"/>
+                <text class="topo-label" x="450" y="120">sonic-spine-01</text>
+                <text class="topo-role" x="450" y="97" fill="#b388ff">SPINE</text>
+            </g>
+
+            <!-- Leaf nodes -->
+            <g class="topo-node" id="topo-sonic-leaf-01">
+                <rect x="225" y="185" width="150" height="35" rx="4" fill="#111820" stroke="#00b8d4" stroke-width="1.5"/>
+                <text class="topo-label" x="300" y="205">sonic-leaf-01</text>
+                <text class="topo-role" x="300" y="182" fill="#00e5ff">LEAF</text>
+            </g>
+            <g class="topo-node" id="topo-sonic-leaf-02">
+                <rect x="525" y="185" width="150" height="35" rx="4" fill="#111820" stroke="#00b8d4" stroke-width="1.5"/>
+                <text class="topo-label" x="600" y="205">sonic-leaf-02</text>
+                <text class="topo-role" x="600" y="182" fill="#00e5ff">LEAF</text>
+            </g>
+
+            <!-- Server icons below leafs -->
+            <text x="300" y="240" text-anchor="middle" font-size="9" fill="#2a3440" font-family="Consolas">Rack 1 Servers</text>
+            <text x="600" y="240" text-anchor="middle" font-size="9" fill="#2a3440" font-family="Consolas">Rack 2 Servers</text>
+            <line class="topo-link" x1="300" y1="220" x2="300" y2="232" stroke-dasharray="3,3"/>
+            <line class="topo-link" x1="600" y1="220" x2="600" y2="232" stroke-dasharray="3,3"/>
+
+            <!-- Cloud label -->
+            <rect x="720" y="95" width="160" height="45" rx="6" fill="none" stroke="#00b8d422" stroke-width="1" stroke-dasharray="4,4"/>
+            <text x="800" y="112" text-anchor="middle" font-size="9" fill="#506070" font-family="Consolas">CLOUD PLATFORM</text>
+            <text x="800" y="128" text-anchor="middle" font-size="8" fill="#2a3440" font-family="Consolas">TelemetryHub  AIPredictor</text>
+            <line class="topo-link" x1="525" y1="117" x2="720" y2="117" stroke-dasharray="5,5"/>
+            <text x="620" y="112" text-anchor="middle" font-size="8" fill="#00b8d444" font-family="Consolas">Kafka</text>
+        </svg>
+    </div>
+
+    <!-- AI Insights & Demo Controls -->
+    <div class="ai-panel">
+        <h2>AI INSIGHT ENGINE <span style="font-size:9px;color:#506070;font-weight:400;letter-spacing:0;">Isolation Forest + Linear Regression + Pearson Correlation</span></h2>
+        <div class="ai-pipeline">
+            <div class="ai-stage">
+                <div class="stage-name">Kafka Ingest</div>
+                <div class="stage-val" id="ai-ingested" style="color:#00b8d4">0</div>
+                <div class="stage-desc">samples consumed</div>
+            </div>
+            <span class="ai-arrow">&rarr;</span>
+            <div class="ai-stage">
+                <div class="stage-name">Anomaly Detection</div>
+                <div class="stage-val" id="ai-anomalies" style="color:#ff5252">0</div>
+                <div class="stage-desc">Isolation Forest</div>
+            </div>
+            <span class="ai-arrow">&rarr;</span>
+            <div class="ai-stage">
+                <div class="stage-name">Fault Prediction</div>
+                <div class="stage-val" id="ai-faults" style="color:#ffab00">0</div>
+                <div class="stage-desc">Trend Extrapolation</div>
+            </div>
+            <span class="ai-arrow">&rarr;</span>
+            <div class="ai-stage">
+                <div class="stage-name">Root Cause</div>
+                <div class="stage-val" id="ai-rca" style="color:#b388ff">0</div>
+                <div class="stage-desc">Correlation Analysis</div>
+            </div>
+        </div>
+        <div style="display:flex; align-items:center; gap: 12px;">
+            <span style="font-size:10px;color:#506070;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Inject Fault Scenario:</span>
+            <div class="demo-controls">
+                <button class="demo-btn" onclick="triggerScenario('cpu_spike')">CPU Spike</button>
+                <button class="demo-btn" onclick="triggerScenario('bgp_flap')">BGP Flap</button>
+                <button class="demo-btn" onclick="triggerScenario('thermal')">Thermal Alarm</button>
+            </div>
+            <div class="demo-status" id="demo-status"></div>
+        </div>
+    </div>
+
+    <!-- Device detail cards -->
+    <div class="grid">
+        <div class="card grid-full">
+            <h2>SONiC Device Status (Real-Time)</h2>
+            <div id="devices-grid" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:10px;">
+                <div class="empty-msg">Waiting for device telemetry...</div>
+            </div>
+        </div>
+
+        <!-- BGP Sessions -->
+        <div class="card grid-half">
+            <h2>BGP Sessions</h2>
+            <div class="scroll-panel" id="bgp-container">
+                <div class="empty-msg">Waiting for BGP data...</div>
+            </div>
+        </div>
+
+        <!-- Hardware Health -->
+        <div class="card grid-half">
+            <h2>Hardware Health</h2>
+            <div class="scroll-panel" id="hw-container">
+                <div class="empty-msg">Waiting for hardware data...</div>
+            </div>
+        </div>
+
+        <!-- Alerts -->
+        <div class="card grid-half">
+            <h2>Active Alerts <span id="alert-count" style="color:#ff5252;">(0)</span></h2>
+            <div class="scroll-panel" id="alerts-list">
+                <div class="empty-msg">Waiting for alerts...</div>
+            </div>
+        </div>
+
+        <!-- AI Predictions -->
+        <div class="card grid-half">
+            <h2>AI Predictions <span id="prediction-count" style="color:#b388ff;">(0)</span></h2>
+            <div class="scroll-panel" id="predictions-list">
+                <div class="empty-msg">Waiting for predictions...</div>
+            </div>
+        </div>
+
+        <!-- Network Flows -->
+        <div class="card grid-full">
+            <h2>eBPF Network Flows</h2>
+            <div class="scroll-panel" style="max-height:220px;">
+                <table class="flow-table">
+                    <thead><tr><th>Device</th><th>Proto</th><th>Source</th><th>Destination</th><th>Bytes</th><th>Latency</th><th>Process</th></tr></thead>
+                    <tbody id="flows-table"><tr><td colspan="7" class="empty-msg">Waiting for flows...</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">SONiC AI Datacenter NOC &mdash; Kafka + InfluxDB + scikit-learn + FastAPI</div>
+
+    <script>
+    const API_BASE = 'http://localhost:8000';
+    const WS_URL = 'ws://localhost:8000/ws/stream';
+
+    let msgCount = 0, alertCount = 0, predictionCount = 0, metricsCount = 0, anomalyCount = 0;
+    let aiFaults = 0, aiRCA = 0;
+    const devices = {};
+    const alerts = [];
+    const predictions = [];
+
+    // ── WebSocket ──────────────────────────────────────
+    function connectWS() {
+        const dot = document.getElementById('ws-status');
+        const label = document.getElementById('ws-label');
+        let ws;
+        try { ws = new WebSocket(WS_URL); } catch(e) { dot.className='status-dot disconnected'; label.textContent='Error'; return; }
+
+        ws.onopen = () => { dot.className='status-dot connected'; label.textContent='Connected'; };
+        ws.onclose = () => { dot.className='status-dot disconnected'; label.textContent='Reconnecting...'; setTimeout(connectWS, 3000); };
+        ws.onerror = () => { dot.className='status-dot disconnected'; };
+
+        ws.onmessage = (event) => {
+            msgCount++;
+            document.getElementById('msg-count').textContent = msgCount + ' msgs';
+            try {
+                const msg = JSON.parse(event.data);
+                if (msg.type === 'metric') handleMetric(msg.data);
+                else if (msg.type === 'alert') handleAlert(msg.data);
+                else if (msg.type === 'prediction') handlePrediction(msg.data);
+            } catch(e) {}
+        };
+    }
+
+    // ── Handlers ──────────────────────────────────────
+    function handleMetric(data) {
+        metricsCount++;
+        const id = data.agent_id || 'unknown';
+        devices[id] = data;
+        document.getElementById('active-devices').textContent = Object.keys(devices).length;
+        document.getElementById('total-metrics').textContent = metricsCount;
+        document.getElementById('ai-ingested').textContent = metricsCount;
+        updateBGPStats();
+        renderDevices();
+        renderBGP();
+        renderHardware();
+    }
+
+    function handleAlert(data) {
+        alertCount++;
+        alerts.unshift(data);
+        if (alerts.length > 30) alerts.pop();
+        document.getElementById('total-alerts').textContent = alertCount;
+        document.getElementById('alert-count').textContent = '(' + alerts.length + ')';
+        renderAlerts();
+    }
+
+    function handlePrediction(data) {
+        predictionCount++;
+        if (data.model === 'anomaly_detection' && data.result && data.result.is_anomaly) anomalyCount++;
+        if (data.model === 'fault_prediction') aiFaults++;
+        if (data.model === 'root_cause_analysis') aiRCA++;
+        predictions.unshift(data);
+        if (predictions.length > 20) predictions.pop();
+        document.getElementById('total-predictions').textContent = predictionCount;
+        document.getElementById('prediction-count').textContent = '(' + predictions.length + ')';
+        const rate = metricsCount > 0 ? ((anomalyCount / metricsCount) * 100).toFixed(1) : '0';
+        document.getElementById('anomaly-rate').textContent = rate + '%';
+        // Update AI pipeline counters
+        document.getElementById('ai-anomalies').textContent = anomalyCount;
+        document.getElementById('ai-faults').textContent = aiFaults;
+        document.getElementById('ai-rca').textContent = aiRCA;
+        renderPredictions();
+    }
+
+    // ── BGP summary ───────────────────────────────────
+    function updateBGPStats() {
+        let total = 0, up = 0;
+        for (const d of Object.values(devices)) {
+            if (Array.isArray(d.bgp)) {
+                total += d.bgp.length;
+                up += d.bgp.filter(b => b.state === 'Established').length;
+            }
+        }
+        document.getElementById('bgp-sessions').textContent = up + '/' + total;
+    }
+
+    // ── Helpers ───────────────────────────────────────
+    function gaugeColor(v) { return v >= 90 ? 'g-red' : v >= 70 ? 'g-yellow' : 'g-green'; }
+    function valColor(v) { return v >= 90 ? '#ff1744' : v >= 70 ? '#ffab00' : '#69f0ae'; }
+    function formatBytes(b) {
+        if (b > 1e9) return (b/1e9).toFixed(1) + 'G';
+        if (b > 1e6) return (b/1e6).toFixed(1) + 'M';
+        if (b > 1e3) return (b/1e3).toFixed(1) + 'K';
+        return b + 'B';
+    }
+    function roleClass(r) { return 'role-' + (r || 'leaf'); }
+
+    // ── Render: Devices ───────────────────────────────
+    function renderDevices() {
+        const grid = document.getElementById('devices-grid');
+        grid.innerHTML = '';
+        for (const [id, d] of Object.entries(devices)) {
+            const cpu = d.cpu ? d.cpu.usage_percent : 0;
+            const mem = d.memory ? d.memory.usage_percent : 0;
+            const role = (d.node && d.node.role) || 'leaf';
+            const netArr = Array.isArray(d.network) ? d.network : [];
+            const rxTotal = netArr.reduce((s,x) => s + (x.rx_bytes||0), 0);
+            const txTotal = netArr.reduce((s,x) => s + (x.tx_bytes||0), 0);
+            const ifaces = netArr.filter(n => n.rx_bytes > 0 || n.tx_bytes > 0).length;
+            const bgpUp = Array.isArray(d.bgp) ? d.bgp.filter(b => b.state === 'Established').length : 0;
+            const bgpTotal = Array.isArray(d.bgp) ? d.bgp.length : 0;
+
+            // Highlight topo node
+            const topoNode = document.getElementById('topo-' + id);
+            if (topoNode) {
+                const rect = topoNode.querySelector('rect');
+                if (rect) rect.setAttribute('fill', cpu >= 80 ? '#1a0a0a' : '#111820');
+            }
+
+            grid.innerHTML += `
+            <div class="device-card">
+                <div class="device-header">
+                    <span class="device-name">${id}</span>
+                    <span class="device-role ${roleClass(role)}">${role}</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">CPU</span>
+                    <span class="metric-value" style="color:${valColor(cpu)}">${cpu.toFixed(1)}%</span>
+                </div>
+                <div class="gauge-bar"><div class="gauge-fill ${gaugeColor(cpu)}" style="width:${cpu}%"></div></div>
+                <div class="metric-row" style="margin-top:6px;">
+                    <span class="metric-label">Memory</span>
+                    <span class="metric-value" style="color:${valColor(mem)}">${mem.toFixed(1)}%</span>
+                </div>
+                <div class="gauge-bar"><div class="gauge-fill ${gaugeColor(mem)}" style="width:${mem}%"></div></div>
+                <div class="metric-row" style="margin-top:6px;">
+                    <span class="metric-label">Interfaces Active</span>
+                    <span class="metric-value" style="font-size:12px;">${ifaces}/${netArr.length}</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">Net RX / TX</span>
+                    <span class="metric-value" style="font-size:12px;">${formatBytes(rxTotal)} / ${formatBytes(txTotal)}</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">BGP Peers</span>
+                    <span class="metric-value" style="font-size:12px;color:${bgpUp===bgpTotal?'#69f0ae':'#ff5252'}">${bgpUp}/${bgpTotal} up</span>
+                </div>
+            </div>`;
+        }
+    }
+
+    // ── Render: BGP ───────────────────────────────────
+    function renderBGP() {
+        const container = document.getElementById('bgp-container');
+        let html = '';
+        for (const [id, d] of Object.entries(devices)) {
+            if (!Array.isArray(d.bgp) || d.bgp.length === 0) continue;
+            html += `<div style="font-size:11px;color:#00b8d4;margin:8px 0 4px;font-weight:600;">${id}</div>`;
+            html += '<table class="bgp-table"><tr><th>Neighbor</th><th>AS</th><th>State</th><th>Prefixes</th><th>Desc</th></tr>';
+            for (const b of d.bgp) {
+                const st = b.state === 'Established' ? 'bgp-established' : 'bgp-down';
+                html += `<tr>
+                    <td>${b.neighbor_ip}</td>
+                    <td>${b.remote_as}</td>
+                    <td><span class="bgp-state ${st}">${b.state}</span></td>
+                    <td>${b.prefix_rcvd}</td>
+                    <td style="color:#506070">${b.description||''}</td>
+                </tr>`;
+            }
+            html += '</table>';
+        }
+        container.innerHTML = html || '<div class="empty-msg">No BGP data yet</div>';
+    }
+
+    // ── Render: Hardware ──────────────────────────────
+    function renderHardware() {
+        const container = document.getElementById('hw-container');
+        let html = '';
+        for (const [id, d] of Object.entries(devices)) {
+            if (!d.hardware) continue;
+            html += `<div style="font-size:11px;color:#00b8d4;margin:8px 0 4px;font-weight:600;">${id}</div>`;
+
+            // Temperatures
+            if (d.hardware.temperatures && d.hardware.temperatures.length) {
+                html += '<div class="hw-grid">';
+                for (const t of d.hardware.temperatures) {
+                    const pct = Math.min(t.current / t.crit_high * 100, 100);
+                    const color = t.current >= t.high ? '#ff5252' : t.current >= t.high * 0.8 ? '#ffab00' : '#69f0ae';
+                    html += `<div class="hw-item">
+                        <div class="hw-name">${t.name}</div>
+                        <div class="hw-val" style="color:${color}">${t.current.toFixed(1)}<span class="hw-unit">&deg;C</span></div>
+                    </div>`;
+                }
+                html += '</div>';
+            }
+
+            // Fans + PSUs inline
+            let extras = '';
+            if (d.hardware.fans) {
+                for (const f of d.hardware.fans) {
+                    const c = f.status === 'OK' ? '#69f0ae' : '#ff5252';
+                    extras += `<div class="hw-item"><div class="hw-name">${f.name}</div><div class="hw-val" style="color:${c}">${f.speed_pct.toFixed(0)}<span class="hw-unit">%</span></div></div>`;
+                }
+            }
+            if (d.hardware.psus) {
+                for (const p of d.hardware.psus) {
+                    const c = p.status === 'OK' ? '#69f0ae' : '#ff5252';
+                    extras += `<div class="hw-item"><div class="hw-name">${p.name}</div><div class="hw-val" style="color:${c}">${(p.power_watts||0).toFixed(0)}<span class="hw-unit">W</span></div></div>`;
+                }
+            }
+            if (extras) html += '<div class="hw-grid" style="margin-top:6px;">' + extras + '</div>';
+        }
+        container.innerHTML = html || '<div class="empty-msg">No hardware data yet</div>';
+    }
+
+    // ── Render: Alerts ────────────────────────────────
+    function renderAlerts() {
+        const list = document.getElementById('alerts-list');
+        if (!alerts.length) return;
+        list.innerHTML = alerts.map(a => {
+            const sev = (a.severity || 'warning').toLowerCase();
+            const time = a.timestamp ? new Date(a.timestamp).toLocaleTimeString() : '';
+            return `<div class="alert-item ${sev}">
+                <span class="alert-time">${time}</span>
+                <span class="alert-badge ${sev}">${sev}</span>
+                <span>${a.message || a.metric + ': ' + (a.value||'')}</span>
+                <span style="margin-left:auto;color:#2a3440;font-size:10px;">${a.agent_id||''}</span>
+            </div>`;
+        }).join('');
+    }
+
+    // ── Render: Predictions ───────────────────────────
+    function renderPredictions() {
+        const list = document.getElementById('predictions-list');
+        if (!predictions.length) return;
+        list.innerHTML = predictions.map(p => {
+            const r = p.result || {};
+            let detail = '';
+            if (p.model === 'anomaly_detection') {
+                detail = `Score: ${r.anomaly_score||'?'} | Affected: ${(r.affected_metrics||[]).join(', ')||'none'}`;
+            } else if (p.model === 'fault_prediction') {
+                detail = `Fault: ${r.predicted_fault||'?'} | Conf: ${((r.confidence||0)*100).toFixed(0)}% | ETA: ${r.time_to_fault_minutes||'?'}min`;
+            } else if (p.model === 'root_cause_analysis') {
+                const top = (r.root_causes||[])[0];
+                detail = top ? `Root: ${top.metric} (r=${top.correlation})` : 'No root causes';
+            }
+            return `<div class="prediction-item">
+                <div class="prediction-model">${(p.model||'').replace(/_/g,' ')}</div>
+                <div class="prediction-detail">${detail}</div>
+                <div style="font-size:9px;color:#2a3440;margin-top:2px;">${p.agent_id||''}</div>
+            </div>`;
+        }).join('');
+    }
+
+    // ── REST fallback ─────────────────────────────────
+    async function pollREST() {
+        try {
+            const [mRes, aRes, pRes] = await Promise.all([
+                fetch(API_BASE + '/api/v1/metrics').then(r => r.json()).catch(() => null),
+                fetch(API_BASE + '/api/v1/alerts').then(r => r.json()).catch(() => null),
+                fetch(API_BASE + '/api/v1/predictions').then(r => r.json()).catch(() => null),
+            ]);
+            if (mRes && mRes.data) mRes.data.forEach(d => handleMetric(d));
+            if (aRes && aRes.data) aRes.data.forEach(d => handleAlert(d));
+            if (pRes && pRes.data) pRes.data.forEach(d => handlePrediction(d));
+        } catch(e) {}
+    }
+
+    // ── Demo trigger ─────────────────────────────────
+    async function triggerScenario(scenarioId) {
+        const statusEl = document.getElementById('demo-status');
+        const btns = document.querySelectorAll('.demo-btn');
+
+        // Visual feedback
+        btns.forEach(b => b.disabled = true);
+        const btn = [...btns].find(b => b.textContent.toLowerCase().includes(scenarioId.replace('_',' ').split(' ')[0]));
+        if (btn) btn.classList.add('firing');
+        statusEl.innerHTML = '<span style="color:#ffab00">Injecting fault...</span>';
+
+        try {
+            const res = await fetch(API_BASE + '/api/v1/demo/trigger/' + scenarioId, { method: 'POST' });
+            const data = await res.json();
+            statusEl.innerHTML = `<span style="color:#69f0ae">Injected: ${data.description} (${data.messages_sent} msgs to ${data.target_device})</span>`;
+        } catch(e) {
+            statusEl.innerHTML = '<span style="color:#ff5252">Failed to trigger — is the API Gateway running?</span>';
+        }
+
+        setTimeout(() => {
+            btns.forEach(b => { b.disabled = false; b.classList.remove('firing'); });
+            setTimeout(() => { statusEl.innerHTML = ''; }, 8000);
+        }, 2000);
+    }
+
+    connectWS();
+    setInterval(pollREST, 10000);
+    </script>
+</body>
+</html>

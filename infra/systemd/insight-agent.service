@@ -1,0 +1,53 @@
+# ═══════════════════════════════════════════════════════════
+#  InsightAgent — systemd service for native edge deployment
+#  (Alternative to Docker: run the Go binary directly)
+#
+#  Installation:
+#    1. Build:   make agent-build
+#    2. Copy:    sudo cp bin/insight-agent /usr/local/bin/
+#    3. Config:  sudo mkdir -p /etc/insight-agent
+#                sudo cp .env.edge /etc/insight-agent/agent.env
+#    4. Install: sudo cp infra/systemd/insight-agent.service /etc/systemd/system/
+#    5. Enable:  sudo systemctl daemon-reload
+#                sudo systemctl enable --now insight-agent
+#
+#  Logs:  journalctl -u insight-agent -f
+# ═══════════════════════════════════════════════════════════
+
+[Unit]
+Description=AI Datacenter InsightAgent — Edge Telemetry Collector
+Documentation=https://github.com/ai-datacenter/insight-agent
+After=network-online.target frr.service
+Wants=network-online.target
+Requires=frr.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/insight-agent
+EnvironmentFile=/etc/insight-agent/agent.env
+
+# Restart policy
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Security hardening
+NoNewPrivileges=false
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=/sys
+ReadWritePaths=/var/run/frr
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=256M
+CPUQuota=25%
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=insight-agent
+
+[Install]
+WantedBy=multi-user.target

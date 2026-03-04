@@ -1,0 +1,28 @@
+# /etc/frr/daemons — shared by all VMs
+# Copy to /etc/frr/daemons on each edge VM
+#
+# Enable only the daemons needed for spine-leaf BGP topology
+
+zebra=yes
+bgpd=yes
+ospfd=no
+ospf6d=no
+ripd=no
+ripngd=no
+isisd=no
+pimd=no
+ldpd=no
+nhrpd=no
+eigrpd=no
+babeld=no
+sharpd=no
+pbrd=no
+bfdd=no
+fabricd=no
+vrrpd=no
+pathd=no
+
+# Integrated configuration mode (single frr.conf instead of per-daemon)
+vtysh_enable=yes
+zebra_options="  -A 127.0.0.1 -s 90000000"
+bgpd_options="   -A 127.0.0.1"
